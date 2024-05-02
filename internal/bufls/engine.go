@@ -124,6 +124,16 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	if node == nil {
 		return nil, newCannotResolveLocationError(location)
 	}
+	if _, ok := parentNode.(*ast.ImportNode); ok {
+		if literal, ok := node.(*ast.StringLiteralNode); ok {
+			parentModuleFile, err := moduleFileSet.GetModuleFile(ctx, literal.Val)
+			if err != nil {
+				return nil, err
+			}
+			return newLocation(parentModuleFile.ExternalPath(), 1, 1)
+		}
+	}
+
 	identifier, err := resolveIdentifierFromNode(
 		location,
 		image,
