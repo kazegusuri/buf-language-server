@@ -93,6 +93,8 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	ancestorTracker := new(ast.AncestorTracker)
 	var node ast.TerminalNode
 	var parentNode ast.Node
+	var optionNode *ast.OptionNameNode
+	var ancestors []ast.Node
 	var messagePath []*ast.MessageNode
 	visitor := &ast.SimpleVisitor{
 		DoVisitTerminalNode: func(terminalNode ast.TerminalNode) error {
@@ -112,6 +114,12 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 						continue
 					}
 					messagePath = append(messagePath, messageNode)
+				}
+				ancestors = ancestorTracker.Path()
+				for _, parent := range ancestorTracker.Path() {
+					if opt, ok := parent.(*ast.OptionNameNode); ok {
+						optionNode = opt
+					}
 				}
 				return errBreak
 			}
@@ -134,7 +142,44 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 		}
 	}
 
-	identifier, err := resolveIdentifierFromNode(
+	var identifiers []string
+	if optionNode != nil {
+		insidePart := -1
+
+		if len(optionNode.Parts) == 0 {
+			return nil, newCannotResolveLocationError(location)
+		}
+		var contains bool
+		visitor := &ast.SimpleVisitor{
+			DoVisitTerminalNode: func(terminalNode ast.TerminalNode) error {
+				if terminalNode == node {
+					contains = true
+					return errBreak
+				}
+				return nil
+			},
+		}
+
+		for i := 0; i < len(optionNode.Parts); i++ {
+			contains = false
+			if err := ast.Walk(optionNode.Parts[i], visitor); err != nil && !errors.Is(err, errBreak) {
+				return nil, err
+			}
+			if contains {
+				insidePart = i
+			}
+		}
+
+		if insidePart < 0 {
+			return nil, newCannotResolveLocationError(location)
+		}
+
+		for i := 0; i < insidePart; i++ {
+			identifiers = append(identifiers, string(optionNode.Parts[i].Name.AsIdentifier()))
+		}
+	}
+
+	id, err := resolveIdentifierFromNode(
 		location,
 		image,
 		fileNode,
@@ -145,14 +190,58 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	if err != nil {
 		return nil, err
 	}
-	return e.findLocationForIdentifier(
+
+	identifiers = append(identifiers, id)
+
+	loc, err := e.findLocationForIdentifier(
 		ctx,
 		location,
 		moduleFileSet,
 		image,
 		fileNode,
-		identifier,
+		identifiers[0],
+		ancestors,
+		identifiers[1:],
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	return loc, nil
+}
+
+func compoundIdentifierToString(node *ast.CompoundIdentNode, identNode *ast.IdentNode) string {
+	// If the parent is a *ast.CompoundIdentNode then it either represents
+	// a nested descriptor, or a descriptor from another package.
+	//
+	// In either case, we use *ast.IdentNode to recognize where the user's
+	// cursor is, and include all of the other children up to (and including)
+	// that identifier so that it's appropriately scoped.
+	//
+	// For example, the following cursor positions resolve to the following
+	// descriptors:
+	//
+	//  * foo.v1.[F]oo.Bar => foo.v1.Foo
+	//  * foo.v1.Foo.[B]ar => foo.v1.Foo.Bar
+	//
+	var compoundIdentifier string
+	if node.LeadingDot != nil {
+		compoundIdentifier += "."
+	}
+	for i, component := range node.Components {
+		compoundIdentifier += component.Val
+		if component == identNode {
+			// This is the component that the user's cursor is on,
+			// so we stop here.
+			break
+		}
+		if len(node.Dots) > i {
+			// The length of Dots is always one less than the length
+			// of Components.
+			compoundIdentifier += "."
+		}
+	}
+	return compoundIdentifier
 }
 
 // resolvedIdentifierFromNode returns the full name of the descriptor associated with
@@ -265,7 +354,7 @@ func resolveIdentifierFromNode(
 				}
 			}
 			for _, messageElement := range messageElements {
-				if _, ok := findNestedDescriptor(fileNode, messageElement, identifierComponents...); ok {
+				if _, _, ok := findNestedDescriptor(messageElement, identifierComponents...); ok {
 					// A nested message can be referenced in the same way as
 					// a top-level message, so we need to consult the other
 					// messages defined in the same scope (but only at the
@@ -327,7 +416,7 @@ func resolveIdentifierFromNode(
 						// Unreachable, but included for additional safety.
 						return "", fmt.Errorf("expected a message element, got %T", node)
 					}
-					if _, ok := findNestedDescriptor(fileNode, messageElement, identifierComponents...); ok {
+					if _, _, ok := findNestedDescriptor(messageElement, identifierComponents...); ok {
 						resolvedIdentifier = true
 						break
 					}
@@ -404,7 +493,9 @@ func (e *engine) findLocationForIdentifier(
 	image bufimage.Image,
 	fileNode *ast.FileNode,
 	identifier string,
-) (_ Location, retErr error) {
+	ancestors []ast.Node,
+	additionalIdentifiers []string,
+) (_ *location, retErr error) {
 	if len(identifier) == 0 {
 		return nil, errors.New("identifier must be non-empty")
 	}
@@ -457,7 +548,30 @@ func (e *engine) findLocationForIdentifier(
 	packageNamePrefix := packageNameForFile(parentFileNode) + "."
 	descriptorName := strings.TrimPrefix(identifier, packageNamePrefix)
 	descriptorNameComponents := strings.Split(descriptorName, ".")
-	var nodeInfo *ast.NodeInfo
+
+	var useOption bool
+	var foundOptionNode bool
+	var optionNode ast.Node
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		node := ancestors[i]
+		if _, ok := node.(*ast.OptionNode); ok {
+			useOption = true
+		}
+		if !useOption {
+			continue
+		}
+		switch node.(type) {
+		case *ast.FileNode, *ast.MessageNode, *ast.FieldNode:
+			optionNode = node
+			foundOptionNode = true
+		}
+		if foundOptionNode {
+			break
+		}
+	}
+
+	var targetNode ast.Node
+	var targetTerminalNode ast.TerminalNode
 	for _, decl := range parentFileNode.Decls {
 		switch node := decl.(type) {
 		case *ast.EnumNode, *ast.MessageNode:
@@ -466,22 +580,149 @@ func (e *engine) findLocationForIdentifier(
 				// Unreachable, but included for additional safety.
 				return nil, fmt.Errorf("expected a message element, got %T", node)
 			}
-			if targetNodeInfo, ok := findNestedDescriptor(parentFileNode, messageElement, descriptorNameComponents...); ok {
-				nodeInfo = &targetNodeInfo
+			if n1, n2, ok := findNestedDescriptor(messageElement, descriptorNameComponents...); ok {
+				targetTerminalNode = n1
+				targetNode = n2
 				break
+			}
+		case *ast.ExtendNode:
+			var option string
+			switch optionNode.(type) {
+			case *ast.FileNode:
+				option = "google.protobuf.FileOptions"
+			case *ast.MessageNode:
+				option = "google.protobuf.MessageOptions"
+			case *ast.FieldNode:
+				option = "google.protobuf.FieldOptions"
+			case *ast.OneOfNode:
+				option = "google.protobuf.OneofOptions"
+			case *ast.EnumNode:
+				option = "google.protobuf.EnumOptions"
+			case *ast.EnumValueNode:
+				option = "google.protobuf.EnumValueOptions"
+			case *ast.ServiceNode:
+				option = "google.protobuf.ServiceOptions"
+			case *ast.RPCNode:
+				option = "google.protobuf.MethodOptions"
+			}
+
+			if string(node.Extendee.AsIdentifier()) == option {
+				for _, decl := range node.Decls {
+					switch node := decl.(type) {
+					case *ast.FieldNode, *ast.GroupNode:
+						messageElement, ok := node.(ast.MessageElement)
+						if !ok {
+							// Unreachable, but included for additional safety.
+							return nil, fmt.Errorf("expected a message element, got %T", node)
+						}
+
+						if n1, n2, ok := findNestedDescriptor(messageElement, descriptorNameComponents...); ok {
+							targetTerminalNode = n1
+							targetNode = n2
+							break
+						}
+					}
+				}
 			}
 		}
 	}
-	if nodeInfo == nil {
+
+	if targetTerminalNode == nil {
 		// Should be unreachable, but could be an internal error / bug if we get here.
 		return nil, fmt.Errorf("could not find %s in %s", identifier, parentModuleFile.ExternalPath())
 	}
-	start := nodeInfo.Start()
-	return newLocation(
-		parentModuleFile.ExternalPath(),
-		start.Line,
-		start.Col,
+
+	if len(additionalIdentifiers) == 0 {
+		targetNodeInfo := parentFileNode.NodeInfo(targetTerminalNode)
+		start := targetNodeInfo.Start()
+		loc, err := newLocation(
+			parentModuleFile.ExternalPath(),
+			start.Line,
+			start.Col,
+		)
+		return loc, err
+	}
+
+	var targetTypeNode ast.TerminalNode
+	switch node := targetNode.(type) {
+	case *ast.FieldNode:
+		switch node2 := node.FldType.(type) {
+		case *ast.IdentNode:
+			targetTypeNode = node2
+		case *ast.CompoundIdentNode:
+		}
+	}
+
+	newMessagePath, newAncestors, found, err := findTargetNode(parentFileNode, targetTypeNode)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("could not find %s in %s", targetTypeNode, parentModuleFile.ExternalPath())
+	}
+
+	typeIdent, err := resolveIdentifierFromNode(
+		inputLocation,
+		image,
+		parentFileNode,
+		targetTypeNode,
+		newAncestors[len(newAncestors)-2],
+		newMessagePath,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	fullIdentifier := typeIdent + "." + additionalIdentifiers[0]
+	return e.findLocationForIdentifier(
+		ctx,
+		inputLocation,
+		moduleFileSet,
+		image,
+		parentFileNode,
+		fullIdentifier,
+		newAncestors,
+		additionalIdentifiers[1:],
+	)
+}
+
+func findTargetNode(fileNode *ast.FileNode, target ast.TerminalNode) ([]*ast.MessageNode, []ast.Node, bool, error) {
+	ancestorTracker := new(ast.AncestorTracker)
+	var found bool
+	var ancestors []ast.Node
+	var messagePath []*ast.MessageNode
+	visitor := &ast.SimpleVisitor{
+		DoVisitTerminalNode: func(terminalNode ast.TerminalNode) error {
+			if terminalNode != target {
+				return nil
+			}
+
+			found = true
+			ancestors = ancestorTracker.Path()
+
+			for _, parent := range ancestorTracker.Path() {
+				// Capture all of the messages in the parent path
+				// so that we can recover the message's full name
+				// (i.e. for nested messages).
+				messageNode, ok := parent.(*ast.MessageNode)
+				if !ok {
+					continue
+				}
+				messagePath = append(messagePath, messageNode)
+			}
+
+			return errBreak
+		},
+	}
+	if err := ast.Walk(fileNode, visitor, ancestorTracker.AsWalkOptions()...); err != nil && !errors.Is(err, errBreak) {
+		return nil, nil, false, err
+	}
+
+	if !found {
+		return nil, nil, false, nil
+	}
+
+	return messagePath, ancestors, true, nil
 }
 
 // buildForExternalPath returns the ModuleFileSet that defines the ModuleFile identified by
@@ -565,9 +806,9 @@ func (e *engine) buildForExternalPath(
 // We use the ast.MessageElement type here so that it permits *ast.MessageNode,
 // *ast.EnumNode, and *ast.GroupNode values. We validate that those types are the
 // only ones permitted.
-func findNestedDescriptor(fileNode *ast.FileNode, messageElement ast.MessageElement, identifierComponents ...string) (ast.NodeInfo, bool) {
+func findNestedDescriptor(messageElement ast.MessageElement, identifierComponents ...string) (ast.TerminalNode, ast.Node, bool) {
 	if len(identifierComponents) == 0 {
-		return ast.NodeInfo{}, false
+		return nil, nil, false
 	}
 	targetName := identifierComponents[0]
 	if len(identifierComponents) == 1 {
@@ -579,11 +820,13 @@ func findNestedDescriptor(fileNode *ast.FileNode, messageElement ast.MessageElem
 			name = node.Name
 		case *ast.GroupNode:
 			name = node.Name
+		case *ast.FieldNode:
+			name = node.Name
 		}
 		if name.Val != targetName {
-			return ast.NodeInfo{}, false
+			return nil, nil, false
 		}
-		return fileNode.NodeInfo(name), true
+		return name, messageElement, true
 	}
 	// We need to recurse into the nested message definitions,
 	// which could either be a standard nested message, or a
@@ -597,19 +840,31 @@ func findNestedDescriptor(fileNode *ast.FileNode, messageElement ast.MessageElem
 	case *ast.MessageNode:
 		name = node.Name.Val
 		messageBody = node.MessageBody
+	case *ast.EnumNode:
+		name = node.Name.Val
+	default:
 	}
 	if name != targetName {
-		return ast.NodeInfo{}, false
+		return nil, nil, false
 	}
 	for _, messageDecl := range messageBody.Decls {
 		switch nestedNode := messageDecl.(type) {
-		case *ast.EnumNode, *ast.GroupNode, *ast.MessageNode:
-			if nodeInfo, ok := findNestedDescriptor(fileNode, nestedNode, identifierComponents[1:]...); ok {
-				return nodeInfo, true
+		case *ast.EnumNode, *ast.GroupNode, *ast.MessageNode, *ast.FieldNode:
+			if n1, n2, ok := findNestedDescriptor(nestedNode, identifierComponents[1:]...); ok {
+				return n1, n2, true
+			}
+		case *ast.OneOfNode:
+			for _, decl := range nestedNode.Decls {
+				switch nestedNode2 := decl.(type) {
+				case *ast.FieldNode, *ast.GroupNode:
+					if n1, n2, ok := findNestedDescriptor(nestedNode2.(ast.MessageElement), identifierComponents[1:]...); ok {
+						return n1, n2, true
+					}
+				}
 			}
 		}
 	}
-	return ast.NodeInfo{}, false
+	return nil, nil, false
 }
 
 // isNestedDescriptorFromFile is behaviorally similar to findNestedDescriptor, but it's tailored
