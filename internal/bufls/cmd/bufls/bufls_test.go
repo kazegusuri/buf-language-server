@@ -361,6 +361,16 @@ func testDefinitionUseOption(t *testing.T) {
 		"testdata/local/useoption/option.proto:20:43",
 		"testdata/local/useoption/localextend.proto:29:12",
 	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:23:25",
+		"testdata/local/useoption/localextend.proto:25:9",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:24:33",
+		"testdata/local/useoption/localextend.proto:35:6",
+	)
 }
 
 func testDefinitionWithCacheDependency(t *testing.T) {

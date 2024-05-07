@@ -31,3 +31,8 @@ message ExtendObject {
 
   Nested c = 2;
 }
+
+enum ExtendEnum {
+  FOO_UNSPECIFIED = 0;
+  FOO_BAR = 1;
+}

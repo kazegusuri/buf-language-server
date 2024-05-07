@@ -152,6 +152,31 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	// In this case, the request tries to resolve an option value.
 	// Need to find the identifier of the type at first.
 	if optionNameNode == nil && optionNode != nil {
+		// Special handling: This is a string value in option node.
+		// In this case, if it is type_url format, try to resolve the type instead.
+		if lit, ok := node.(*ast.StringLiteralNode); ok {
+			val := lit.Val
+
+			if strings.HasPrefix(val, "type.googleapis.com/") {
+				val = strings.TrimPrefix(val, "type.googleapis.com/")
+
+				loc, err := e.findLocationForIdentifier(
+					ctx,
+					location,
+					moduleFileSet,
+					image,
+					fileNode,
+					val,
+					nil,
+					nil,
+				)
+				if err != nil {
+					return nil, err
+				}
+				return loc, nil
+			}
+		}
+
 		optionNameNode = optionNode.Name
 		var found bool
 		for _, n := range ancestors {

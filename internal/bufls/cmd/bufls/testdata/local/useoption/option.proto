@@ -19,4 +19,9 @@ message Object {
       (localopt2).nested2 = {b: "a"},
       (localopt2).obj = {a: "a", c : {b: "b"}}
   ];
+  string c = 3 [
+      (localopt) = "type.googleapis.com/useoptionv1.ExtendObject",
+      (localopt2).nested.b = "type.googleapis.com/useoptionv1.ExtendEnum"
+  ];
+
 }
