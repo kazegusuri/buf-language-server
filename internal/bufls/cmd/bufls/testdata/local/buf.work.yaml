@@ -12,3 +12,4 @@ directories:
   - nopackage
   - withcachedependency
   - withworkspacedependency
+  - useoption

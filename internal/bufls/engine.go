@@ -93,7 +93,8 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	ancestorTracker := new(ast.AncestorTracker)
 	var node ast.TerminalNode
 	var parentNode ast.Node
-	var optionNode *ast.OptionNameNode
+	var optionNode *ast.OptionNode
+	var optionNameNode *ast.OptionNameNode
 	var ancestors []ast.Node
 	var messagePath []*ast.MessageNode
 	visitor := &ast.SimpleVisitor{
@@ -118,6 +119,9 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 				ancestors = ancestorTracker.Path()
 				for _, parent := range ancestorTracker.Path() {
 					if opt, ok := parent.(*ast.OptionNameNode); ok {
+						optionNameNode = opt
+					}
+					if opt, ok := parent.(*ast.OptionNode); ok {
 						optionNode = opt
 					}
 				}
@@ -143,10 +147,31 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	}
 
 	var identifiers []string
-	if optionNode != nil {
-		insidePart := -1
+	var suffixes []string
 
-		if len(optionNode.Parts) == 0 {
+	// In this case, the request tries to resolve an option value.
+	// Need to find the identifier of the type at first.
+	if optionNameNode == nil && optionNode != nil {
+		optionNameNode = optionNode.Name
+		var found bool
+		for _, n := range ancestors {
+			if n == optionNode {
+				found = true
+			}
+
+			if found {
+				// TODO: should check the field is name node or value node
+				if fieldNode, ok := n.(*ast.MessageFieldNode); ok {
+					suffixes = append(suffixes, string(fieldNode.Name.Name.AsIdentifier()))
+				}
+			}
+		}
+	}
+
+	if optionNameNode != nil {
+		insidePart := len(optionNameNode.Parts)
+
+		if len(optionNameNode.Parts) == 0 {
 			return nil, newCannotResolveLocationError(location)
 		}
 		var contains bool
@@ -160,9 +185,9 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 			},
 		}
 
-		for i := 0; i < len(optionNode.Parts); i++ {
+		for i := 0; i < len(optionNameNode.Parts); i++ {
 			contains = false
-			if err := ast.Walk(optionNode.Parts[i], visitor); err != nil && !errors.Is(err, errBreak) {
+			if err := ast.Walk(optionNameNode.Parts[i], visitor); err != nil && !errors.Is(err, errBreak) {
 				return nil, err
 			}
 			if contains {
@@ -170,28 +195,28 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 			}
 		}
 
-		if insidePart < 0 {
-			return nil, newCannotResolveLocationError(location)
-		}
-
 		for i := 0; i < insidePart; i++ {
-			identifiers = append(identifiers, string(optionNode.Parts[i].Name.AsIdentifier()))
+			identifiers = append(identifiers, string(optionNameNode.Parts[i].Name.AsIdentifier()))
 		}
 	}
 
-	id, err := resolveIdentifierFromNode(
-		location,
-		image,
-		fileNode,
-		node,
-		parentNode,
-		messagePath,
-	)
-	if err != nil {
-		return nil, err
-	}
+	if len(suffixes) == 0 {
+		id, err := resolveIdentifierFromNode(
+			location,
+			image,
+			fileNode,
+			node,
+			parentNode,
+			messagePath,
+		)
+		if err != nil {
+			return nil, err
+		}
 
-	identifiers = append(identifiers, id)
+		identifiers = append(identifiers, id)
+	} else {
+		identifiers = append(identifiers, suffixes...)
+	}
 
 	loc, err := e.findLocationForIdentifier(
 		ctx,
@@ -208,40 +233,6 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	}
 
 	return loc, nil
-}
-
-func compoundIdentifierToString(node *ast.CompoundIdentNode, identNode *ast.IdentNode) string {
-	// If the parent is a *ast.CompoundIdentNode then it either represents
-	// a nested descriptor, or a descriptor from another package.
-	//
-	// In either case, we use *ast.IdentNode to recognize where the user's
-	// cursor is, and include all of the other children up to (and including)
-	// that identifier so that it's appropriately scoped.
-	//
-	// For example, the following cursor positions resolve to the following
-	// descriptors:
-	//
-	//  * foo.v1.[F]oo.Bar => foo.v1.Foo
-	//  * foo.v1.Foo.[B]ar => foo.v1.Foo.Bar
-	//
-	var compoundIdentifier string
-	if node.LeadingDot != nil {
-		compoundIdentifier += "."
-	}
-	for i, component := range node.Components {
-		compoundIdentifier += component.Val
-		if component == identNode {
-			// This is the component that the user's cursor is on,
-			// so we stop here.
-			break
-		}
-		if len(node.Dots) > i {
-			// The length of Dots is always one less than the length
-			// of Components.
-			compoundIdentifier += "."
-		}
-	}
-	return compoundIdentifier
 }
 
 // resolvedIdentifierFromNode returns the full name of the descriptor associated with
@@ -499,6 +490,28 @@ func (e *engine) findLocationForIdentifier(
 	if len(identifier) == 0 {
 		return nil, errors.New("identifier must be non-empty")
 	}
+
+	var useOption bool
+	var foundOptionNode bool
+	var optionNode ast.Node
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		node := ancestors[i]
+		if _, ok := node.(*ast.OptionNode); ok {
+			useOption = true
+		}
+		if !useOption {
+			continue
+		}
+		switch node.(type) {
+		case *ast.FileNode, *ast.MessageNode, *ast.FieldNode, *ast.RPCNode, *ast.ServiceNode:
+			optionNode = node
+			foundOptionNode = true
+		}
+		if foundOptionNode {
+			break
+		}
+	}
+
 	files, err := protodesc.NewFiles(bufimage.ImageToFileDescriptorSet(image))
 	if err != nil {
 		return nil, err
@@ -508,13 +521,43 @@ func (e *engine) findLocationForIdentifier(
 	if err != nil && !errors.Is(err, protoregistry.NotFound) {
 		return nil, err
 	}
+
 	if errors.Is(err, protoregistry.NotFound) {
-		// TODO: The identifier is either a [custom] option, or one of the well-known types.
-		//
-		// If the identifier is a WKT, we might want to initialize the local module cache
-		// with a synthesized version of the well-known types that we can always jump to
-		// (e.g. ~/.cache/buf/v1/wkt).
-		return nil, newCannotResolveLocationError(inputLocation)
+		fileFullname := protoreflect.FullName(packageNameForFile(fileNode))
+		var exntendedMessageName protoreflect.FullName
+		files.RangeFilesByPackage(fileFullname, func(d protoreflect.FileDescriptor) bool {
+			extensions := d.Extensions()
+			ext := extensions.ByName(protoreflect.Name(identifierFullName))
+			if ext == nil {
+				return true
+			}
+
+			if ext.Message() == nil {
+				exntendedMessageName = ext.FullName()
+			} else {
+				exntendedMessageName = ext.Message().FullName()
+			}
+
+			return false
+		})
+
+		if exntendedMessageName == "" {
+			// TODO: The identifier is either a [custom] option, or one of the well-known types.
+			//
+			// If the identifier is a WKT, we might want to initialize the local module cache
+			// with a synthesized version of the well-known types that we can always jump to
+			// (e.g. ~/.cache/buf/v1/wkt).
+			return nil, newCannotResolveLocationError(inputLocation)
+		}
+
+		identifierFullName := exntendedMessageName
+		descriptor, err = files.FindDescriptorByName(identifierFullName)
+		if err != nil && !errors.Is(err, protoregistry.NotFound) {
+			return nil, err
+		}
+		if errors.Is(err, protoregistry.NotFound) {
+			return nil, newCannotResolveLocationError(inputLocation)
+		}
 	}
 	// Now that we know where the identifier is defined, parse the
 	// file into an AST to locate where it's defined.
@@ -548,27 +591,6 @@ func (e *engine) findLocationForIdentifier(
 	packageNamePrefix := packageNameForFile(parentFileNode) + "."
 	descriptorName := strings.TrimPrefix(identifier, packageNamePrefix)
 	descriptorNameComponents := strings.Split(descriptorName, ".")
-
-	var useOption bool
-	var foundOptionNode bool
-	var optionNode ast.Node
-	for i := len(ancestors) - 1; i >= 0; i-- {
-		node := ancestors[i]
-		if _, ok := node.(*ast.OptionNode); ok {
-			useOption = true
-		}
-		if !useOption {
-			continue
-		}
-		switch node.(type) {
-		case *ast.FileNode, *ast.MessageNode, *ast.FieldNode:
-			optionNode = node
-			foundOptionNode = true
-		}
-		if foundOptionNode {
-			break
-		}
-	}
 
 	var targetNode ast.Node
 	var targetTerminalNode ast.TerminalNode

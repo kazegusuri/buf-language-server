@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package extendv1;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FieldOptions {
+  string opt = 10010;
+  Object opt2 = 10011;
+}
+
+message Object {
+  string a = 1;
+
+  message Nested {
+    string b = 1;
+  }
+
+  Nested nested = 2;
+  Nested nested2 = 3;
+}
+
+message Nested {
+  string v = 1;
+}

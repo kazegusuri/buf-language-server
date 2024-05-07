@@ -34,6 +34,7 @@ func TestDefinition(t *testing.T) {
 	testDefinitionNoPackage(t)
 	testDefinitionWithCacheDependency(t)
 	testDefinitionWithWorkspaceDependency(t)
+	testDefinitionUseOption(t)
 }
 
 func TestDefinitionError(t *testing.T) {
@@ -271,6 +272,94 @@ func testDefinitionNoPackage(t *testing.T) {
 		t,
 		"testdata/local/nopackage/foo.proto:21:8",
 		"testdata/local/nopackage/foo.proto:8:11",
+	)
+}
+
+func testDefinitionUseOption(t *testing.T) {
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:6:19",
+		"testdata/local/useoption/extend/extend.proto:1:1",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:10:17",
+		"testdata/local/useoption/extend/extend.proto:8:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:11:18",
+		"testdata/local/useoption/extend/extend.proto:9:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:11:23",
+		"testdata/local/useoption/extend/extend.proto:13:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:12:27",
+		"testdata/local/useoption/extend/extend.proto:19:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:12:30",
+		"testdata/local/useoption/extend/extend.proto:16:12",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:13:23",
+		"testdata/local/useoption/extend/extend.proto:20:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:13:34",
+		"testdata/local/useoption/extend/extend.proto:16:12",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:16:11",
+		"testdata/local/useoption/localextend.proto:8:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:17:11",
+		"testdata/local/useoption/localextend.proto:9:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:17:19",
+		"testdata/local/useoption/localextend.proto:13:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:18:26",
+		"testdata/local/useoption/localextend.proto:16:12",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:19:30",
+		"testdata/local/useoption/localextend.proto:16:12",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:20:26",
+		"testdata/local/useoption/localextend.proto:26:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:20:34",
+		"testdata/local/useoption/localextend.proto:32:10",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:20:39",
+		"testdata/local/useoption/localextend.proto:29:12",
+	)
+	testDefintionSuccess(
+		t,
+		"testdata/local/useoption/option.proto:20:43",
+		"testdata/local/useoption/localextend.proto:29:12",
 	)
 }
 
