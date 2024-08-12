@@ -20,10 +20,9 @@ import (
 
 	"github.com/bufbuild/buf-language-server/internal/bufls"
 	"github.com/bufbuild/buf/private/buf/bufcli"
-	"github.com/bufbuild/buf/private/bufpkg/bufimage/bufimagebuild"
-	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmodulebuild"
-	"github.com/bufbuild/buf/private/pkg/app/appflag"
-	"github.com/bufbuild/buf/private/pkg/command"
+	"github.com/bufbuild/buf/private/buf/bufctl"
+	"github.com/bufbuild/buf/private/pkg/app/appext"
+
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/multierr"
 )
@@ -31,43 +30,21 @@ import (
 // NewEngine returns a new bufls.Engine.
 func NewEngine(
 	ctx context.Context,
-	container appflag.Container,
+	container appext.Container,
 	disableSymlinks bool,
 ) (bufls.Engine, error) {
-	clientConfig, err := bufcli.NewConnectClientConfig(container)
-	if err != nil {
-		return nil, err
-	}
-	moduleReader, err := bufcli.NewModuleReaderAndCreateCacheDirsWithExternalPaths(
+	controller, err := bufcli.NewController(
 		container,
-		clientConfig,
+		bufctl.WithDisableSymlinks(disableSymlinks),
 	)
 	if err != nil {
 		return nil, err
 	}
-	runner := command.NewRunner()
-	storageosProvider := bufcli.NewStorageosProvider(disableSymlinks)
-	moduleConfigReader, err := bufcli.NewWireModuleConfigReaderForModuleReader(
-		container,
-		storageosProvider,
-		runner,
-		clientConfig,
-		moduleReader,
-	)
-	if err != nil {
-		return nil, err
-	}
-	moduleFileSetBuilder := bufmodulebuild.NewModuleFileSetBuilder(
-		container.Logger(),
-		moduleReader,
-	)
-	imageBuilder := bufimagebuild.NewBuilder(container.Logger())
+
 	return bufls.NewEngine(
 		container.Logger(),
 		container,
-		moduleConfigReader,
-		moduleFileSetBuilder,
-		imageBuilder,
+		controller,
 	), nil
 }
 

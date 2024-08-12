@@ -21,7 +21,7 @@ import (
 	"github.com/bufbuild/buf-language-server/internal/bufls/cmd/bufls/command/definition"
 	"github.com/bufbuild/buf-language-server/internal/bufls/cmd/bufls/command/serve"
 	"github.com/bufbuild/buf/private/pkg/app/appcmd"
-	"github.com/bufbuild/buf/private/pkg/app/appflag"
+	"github.com/bufbuild/buf/private/pkg/app/appext"
 )
 
 // Main is the entrypoint to the buf CLI.
@@ -33,9 +33,9 @@ func Main(name string) {
 //
 // This is public for use in testing.
 func NewRootCommand(name string) *appcmd.Command {
-	builder := appflag.NewBuilder(
+	builder := appext.NewBuilder(
 		name,
-		appflag.BuilderWithTracing(),
+		appext.BuilderWithTracing(),
 	)
 	return &appcmd.Command{
 		Use:                 name,

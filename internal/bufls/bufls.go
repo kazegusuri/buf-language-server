@@ -20,10 +20,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bufbuild/buf/private/buf/bufwire"
-	"github.com/bufbuild/buf/private/bufpkg/bufimage/bufimagebuild"
-	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmodulebuild"
-	"github.com/bufbuild/buf/private/pkg/app/appflag"
+	"github.com/bufbuild/buf/private/buf/bufctl"
+	"github.com/bufbuild/buf/private/pkg/app/appext"
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
 )
@@ -54,17 +52,13 @@ type Engine interface {
 // NewEngine returns a new Protobuf language server engine.
 func NewEngine(
 	logger *zap.Logger,
-	container appflag.Container,
-	moduleConfigReader bufwire.ModuleConfigReader,
-	moduleFileSetBuilder bufmodulebuild.ModuleFileSetBuilder,
-	imageBuilder bufimagebuild.Builder,
+	container appext.Container,
+	controller bufctl.Controller,
 ) Engine {
 	return newEngine(
 		logger,
 		container,
-		moduleConfigReader,
-		moduleFileSetBuilder,
-		imageBuilder,
+		controller,
 	)
 }
 

@@ -19,17 +19,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/bufbuild/buf/private/buf/buffetch"
-	"github.com/bufbuild/buf/private/buf/bufwire"
-	"github.com/bufbuild/buf/private/buf/bufwork"
+	"github.com/bufbuild/buf/private/buf/bufctl"
+	"github.com/bufbuild/buf/private/buf/bufworkspace"
 	"github.com/bufbuild/buf/private/bufpkg/bufanalysis"
 	"github.com/bufbuild/buf/private/bufpkg/bufimage"
-	"github.com/bufbuild/buf/private/bufpkg/bufimage/bufimagebuild"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule"
-	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmodulebuild"
-	"github.com/bufbuild/buf/private/pkg/app/appflag"
+	"github.com/bufbuild/buf/private/pkg/app/appext"
+	"github.com/bufbuild/buf/private/pkg/tracing"
 	"github.com/bufbuild/protocompile/ast"
 	"github.com/bufbuild/protocompile/parser"
 	"github.com/bufbuild/protocompile/reporter"
@@ -46,38 +46,58 @@ import (
 var errBreak = errors.New("break")
 
 type engine struct {
-	logger               *zap.Logger
-	container            appflag.Container
-	moduleConfigReader   bufwire.ModuleConfigReader
-	moduleFileSetBuilder bufmodulebuild.ModuleFileSetBuilder
-	imageBuilder         bufimagebuild.Builder
+	logger     *zap.Logger
+	container  appext.Container
+	controller bufctl.Controller
 }
 
 func newEngine(
 	logger *zap.Logger,
-	container appflag.Container,
-	moduleConfigReader bufwire.ModuleConfigReader,
-	moduleFileSetBuilder bufmodulebuild.ModuleFileSetBuilder,
-	imageBuilder bufimagebuild.Builder,
+	container appext.Container,
+	controller bufctl.Controller,
 ) *engine {
 	return &engine{
-		logger:               logger,
-		container:            container,
-		moduleConfigReader:   moduleConfigReader,
-		moduleFileSetBuilder: moduleFileSetBuilder,
-		imageBuilder:         imageBuilder,
+		logger:     logger,
+		container:  container,
+		controller: controller,
 	}
 }
 
 func (e *engine) Definition(ctx context.Context, location Location) (_ Location, retErr error) {
 	externalPath := location.Path()
-	moduleFileSet, image, err := e.buildForExternalPath(ctx, externalPath)
+
+	// WORKAROUND: When externalPath is specified as an absolute path, it does not work well.
+	// So if it is under home directory, change the current directory to home directory and use
+	// the relative path from home directory.
+	useRelativePath := false
+	if filepath.IsAbs(externalPath) {
+		userHomeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current user: %w", err)
+		}
+		if userHomeDir == "" {
+			return nil, fmt.Errorf("failed to get home dir")
+		}
+
+		relativepath, err := filepath.Rel(userHomeDir, externalPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get relative path: %w", err)
+		}
+
+		useRelativePath = true
+		externalPath = relativepath
+		if err := os.Chdir(userHomeDir); err != nil {
+			return nil, fmt.Errorf("failed to change directory: %w", err)
+		}
+	}
+
+	ws, image, err := e.buildForExternalPath(ctx, externalPath)
 	if err != nil {
 		return nil, err
 	}
-	moduleFile, err := moduleFileForExternalPath(ctx, moduleFileSet, image, externalPath)
+	moduleFile, err := moduleFileForExternalPath(ctx, ws, externalPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not get module file for location %s: %w", externalPath, err)
 	}
 	defer func() {
 		retErr = multierr.Append(retErr, moduleFile.Close())
@@ -138,9 +158,10 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	}
 	if _, ok := parentNode.(*ast.ImportNode); ok {
 		if literal, ok := node.(*ast.StringLiteralNode); ok {
-			parentModuleFile, err := moduleFileSet.GetModuleFile(ctx, literal.Val)
+
+			parentModuleFile, err := moduleFileForExternalPath(ctx, ws, literal.Val)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("could not get module file for literal %s: %w", literal.Val, err)
 			}
 			return newLocation(parentModuleFile.ExternalPath(), 1, 1)
 		}
@@ -163,7 +184,7 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 				loc, err := e.findLocationForIdentifier(
 					ctx,
 					location,
-					moduleFileSet,
+					ws,
 					image,
 					fileNode,
 					val,
@@ -246,7 +267,7 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	loc, err := e.findLocationForIdentifier(
 		ctx,
 		location,
-		moduleFileSet,
+		ws,
 		image,
 		fileNode,
 		identifiers[0],
@@ -255,6 +276,14 @@ func (e *engine) Definition(ctx context.Context, location Location) (_ Location,
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if useRelativePath {
+		absPath, err := filepath.Abs(loc.path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get absolute path: %w", err)
+		}
+		loc.path = absPath
 	}
 
 	return loc, nil
@@ -467,6 +496,7 @@ func resolveIdentifierFromNode(
 		}
 		return identifier, nil
 	}
+
 	// At this point, we know that the identifier isn't defined in the current
 	// file, so we continue with the reference resolution algorithm and search
 	// for a valid reference in the package hierarchy.
@@ -475,7 +505,7 @@ func resolveIdentifierFromNode(
 		candidateScope := strings.Join(scopeSplit[:i], ".")
 		var fileDescriptorProtos []*descriptorpb.FileDescriptorProto
 		for _, imageFile := range image.Files() {
-			fileDescriptorProto := imageFile.Proto()
+			fileDescriptorProto := imageFile.FileDescriptorProto()
 			if fileDescriptorProto.GetPackage() != candidateScope {
 				continue
 			}
@@ -505,7 +535,7 @@ func resolveIdentifierFromNode(
 func (e *engine) findLocationForIdentifier(
 	ctx context.Context,
 	inputLocation Location,
-	moduleFileSet bufmodule.ModuleFileSet,
+	ws bufworkspace.Workspace,
 	image bufimage.Image,
 	fileNode *ast.FileNode,
 	identifier string,
@@ -592,9 +622,9 @@ func (e *engine) findLocationForIdentifier(
 	// unnecessarily parse the same file more than once.
 	parentFileNode := fileNode
 	parentFilePath := descriptor.ParentFile().Path()
-	parentModuleFile, err := moduleFileSet.GetModuleFile(ctx, parentFilePath)
+	parentModuleFile, err := moduleFileForExternalPath(ctx, ws, parentFilePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not get module file %s: %w", parentFilePath, err)
 	}
 	defer func() {
 		retErr = multierr.Append(retErr, parentModuleFile.Close())
@@ -641,8 +671,8 @@ func (e *engine) findLocationForIdentifier(
 				option = "google.protobuf.MessageOptions"
 			case *ast.FieldNode:
 				option = "google.protobuf.FieldOptions"
-			case *ast.OneOfNode:
-				option = "google.protobuf.OneofOptions"
+			// case *ast.OneOfNode:
+			// 	option = "google.protobuf.OneofOptions"
 			case *ast.EnumNode:
 				option = "google.protobuf.EnumOptions"
 			case *ast.EnumValueNode:
@@ -683,7 +713,7 @@ func (e *engine) findLocationForIdentifier(
 		targetNodeInfo := parentFileNode.NodeInfo(targetTerminalNode)
 		start := targetNodeInfo.Start()
 		loc, err := newLocation(
-			parentModuleFile.ExternalPath(),
+			parentModuleFile.LocalPath(),
 			start.Line,
 			start.Col,
 		)
@@ -724,7 +754,7 @@ func (e *engine) findLocationForIdentifier(
 	return e.findLocationForIdentifier(
 		ctx,
 		inputLocation,
-		moduleFileSet,
+		ws,
 		image,
 		parentFileNode,
 		fullIdentifier,
@@ -778,71 +808,19 @@ func findTargetNode(fileNode *ast.FileNode, target ast.TerminalNode) ([]*ast.Mes
 func (e *engine) buildForExternalPath(
 	ctx context.Context,
 	externalPath string,
-) (_ bufmodule.ModuleFileSet, _ bufimage.Image, retErr error) {
-	refParser := buffetch.NewRefParser(
-		e.logger,
-		buffetch.RefParserWithProtoFileRefAllowed(),
-	)
-	sourceRef, err := refParser.GetSourceRef(ctx, externalPath)
+) (_ bufworkspace.Workspace, _ bufimage.Image, retErr error) {
+	ws, err := e.controller.GetWorkspace(ctx, externalPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("could not get workspace for %s: %w", externalPath, err)
 	}
-	moduleConfigs, err := e.moduleConfigReader.GetModuleConfigs(
-		ctx,
-		e.container,
-		sourceRef,
-		"",
-		nil,
-		nil,
-		false,
-	)
+
+	set := bufmodule.ModuleSetToModuleReadBucketWithOnlyProtoFiles(ws)
+	image, err := bufimage.BuildImage(ctx, tracing.NopTracer, set)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("could not build image: %w", err)
 	}
-	if len(moduleConfigs) == 0 {
-		// Unreachable - we should always have at least one module.
-		return nil, nil, fmt.Errorf("could not build module for %s", externalPath)
-	}
-	// We only want to build a single ModuleFileSet and Image (for performance).
-	// The Module that defines the externalPath as a target file is able to reach
-	// all of the references we need, so we only need to build that one.
-	for _, moduleConfig := range moduleConfigs {
-		fileInfos, err := moduleConfig.Module().TargetFileInfos(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		var found bool
-		for _, fileInfo := range fileInfos {
-			if fileInfo.ExternalPath() == externalPath {
-				found = true
-				break
-			}
-		}
-		if !found {
-			continue
-		}
-		moduleFileSet, err := e.moduleFileSetBuilder.Build(
-			ctx,
-			moduleConfig.Module(),
-			bufmodulebuild.WithWorkspace(moduleConfig.Workspace()),
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-		image, fileAnnotations, err := e.imageBuilder.Build(
-			ctx,
-			moduleFileSet,
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-		if len(fileAnnotations) > 0 {
-			return nil, nil, fileAnnotationsToError(fileAnnotations)
-		}
-		return moduleFileSet, image, nil
-	}
-	// Unreacable - if we got this far, we should always find the module.
-	return nil, nil, fmt.Errorf("could not find %s in any module", externalPath)
+
+	return ws, image, nil
 }
 
 // findNestedDescriptor returns the ast.NodeInfo associated with the given
@@ -900,15 +878,15 @@ func findNestedDescriptor(messageElement ast.MessageElement, identifierComponent
 			if n1, n2, ok := findNestedDescriptor(nestedNode, identifierComponents[1:]...); ok {
 				return n1, n2, true
 			}
-		case *ast.OneOfNode:
-			for _, decl := range nestedNode.Decls {
-				switch nestedNode2 := decl.(type) {
-				case *ast.FieldNode, *ast.GroupNode:
-					if n1, n2, ok := findNestedDescriptor(nestedNode2.(ast.MessageElement), identifierComponents[1:]...); ok {
-						return n1, n2, true
-					}
-				}
-			}
+			// case *ast.OneOfNode:
+			// 	for _, decl := range nestedNode.Decls {
+			// 		switch nestedNode2 := decl.(type) {
+			// 		case *ast.FieldNode, *ast.GroupNode:
+			// 			if n1, n2, ok := findNestedDescriptor(nestedNode2.(ast.MessageElement), identifierComponents[1:]...); ok {
+			// 				return n1, n2, true
+			// 			}
+			// 		}
+			// 	}
 		}
 	}
 	return nil, nil, false
@@ -969,23 +947,30 @@ func isNestedDescriptorFromMessage(descriptorProto *descriptorpb.DescriptorProto
 // iterate over the reachable files.
 func moduleFileForExternalPath(
 	ctx context.Context,
-	moduleFileSet bufmodule.ModuleFileSet,
-	image bufimage.Image,
+	ws bufworkspace.Workspace,
 	externalPath string,
-) (bufmodule.ModuleFile, error) {
-	for _, fileInfo := range image.Files() {
-		if externalPath != fileInfo.ExternalPath() {
-			continue
+) (bufmodule.File, error) {
+	for _, mod := range ws.Modules() {
+		var file bufmodule.File
+		if err := mod.WalkFileInfos(ctx, func(info bufmodule.FileInfo) error {
+			var err error
+			if info.ExternalPath() == externalPath || info.Path() == externalPath {
+				file, err = mod.GetFile(ctx, info.Path())
+				if err != nil {
+					return fmt.Errorf("could not get file %s from module: %w", info.Path(), err)
+				}
+				return nil
+			}
+
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("could not walk file infos: %w", err)
 		}
-		moduleFile, err := moduleFileSet.GetModuleFile(
-			ctx,
-			fileInfo.Path(),
-		)
-		if err != nil {
-			return nil, err
+		if file != nil {
+			return file, nil
 		}
-		return moduleFile, nil
 	}
+
 	// TODO: https://github.com/bufbuild/buf/issues/1056
 	//
 	// This will only happen if a buf.work.yaml exists in a parent
@@ -993,11 +978,7 @@ func moduleFileForExternalPath(
 	//
 	// This is also a problem for other commands that interact
 	// with buffetch.ProtoFileRef.
-	return nil, fmt.Errorf(
-		"input %s was not found - is the directory containing this file defined in your %s?",
-		externalPath,
-		bufwork.ExternalConfigV1FilePath,
-	)
+	return nil, fmt.Errorf("input %s was not found", externalPath)
 }
 
 // packageNameForFile returns the package name defined in the given *ast.FileNode,
@@ -1027,9 +1008,9 @@ func locationIsWithinNode(location Location, nodeInfo ast.NodeInfo) bool {
 // fileAnnotationsToError maps the given fileAnnotations into an error.
 func fileAnnotationsToError(fileAnnotations []bufanalysis.FileAnnotation) error {
 	buffer := bytes.NewBuffer(nil)
-	if err := bufanalysis.PrintFileAnnotations(
+	if err := bufanalysis.PrintFileAnnotationSet(
 		buffer,
-		fileAnnotations,
+		bufanalysis.NewFileAnnotationSet(fileAnnotations...),
 		bufanalysis.FormatText.String(),
 	); err != nil {
 		return err
