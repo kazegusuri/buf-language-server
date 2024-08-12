@@ -278,98 +278,98 @@ func testDefinitionNoPackage(t *testing.T) {
 func testDefinitionUseOption(t *testing.T) {
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:6:19",
+		"testdata/local/useoption/option.proto:5:19",
 		"testdata/local/useoption/extend/extend.proto:1:1",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:10:17",
+		"testdata/local/useoption/option.proto:10:15",
 		"testdata/local/useoption/extend/extend.proto:8:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:11:18",
+		"testdata/local/useoption/option.proto:11:16",
 		"testdata/local/useoption/extend/extend.proto:9:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:11:23",
+		"testdata/local/useoption/option.proto:11:21",
 		"testdata/local/useoption/extend/extend.proto:13:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:12:27",
+		"testdata/local/useoption/option.proto:12:25",
 		"testdata/local/useoption/extend/extend.proto:19:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:12:30",
+		"testdata/local/useoption/option.proto:12:28",
 		"testdata/local/useoption/extend/extend.proto:16:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:13:23",
+		"testdata/local/useoption/option.proto:13:21",
 		"testdata/local/useoption/extend/extend.proto:20:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:13:34",
+		"testdata/local/useoption/option.proto:13:32",
 		"testdata/local/useoption/extend/extend.proto:16:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:16:11",
+		"testdata/local/useoption/option.proto:16:9",
 		"testdata/local/useoption/localextend.proto:8:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:17:11",
+		"testdata/local/useoption/option.proto:17:9",
 		"testdata/local/useoption/localextend.proto:9:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:17:19",
-		"testdata/local/useoption/localextend.proto:13:10",
+		"testdata/local/useoption/option.proto:17:17",
+		"testdata/local/useoption/localextend.proto:18:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:18:26",
-		"testdata/local/useoption/localextend.proto:16:12",
+		"testdata/local/useoption/option.proto:18:24",
+		"testdata/local/useoption/localextend.proto:21:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:19:30",
-		"testdata/local/useoption/localextend.proto:16:12",
+		"testdata/local/useoption/option.proto:19:28",
+		"testdata/local/useoption/localextend.proto:21:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:20:26",
-		"testdata/local/useoption/localextend.proto:26:10",
+		"testdata/local/useoption/option.proto:21:7",
+		"testdata/local/useoption/localextend.proto:31:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:20:34",
-		"testdata/local/useoption/localextend.proto:32:10",
+		"testdata/local/useoption/option.proto:22:7",
+		"testdata/local/useoption/localextend.proto:37:10",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:20:39",
-		"testdata/local/useoption/localextend.proto:29:12",
+		"testdata/local/useoption/option.proto:22:11",
+		"testdata/local/useoption/localextend.proto:34:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:20:43",
-		"testdata/local/useoption/localextend.proto:29:12",
+		"testdata/local/useoption/option.proto:22:14",
+		"testdata/local/useoption/localextend.proto:34:12",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:23:25",
-		"testdata/local/useoption/localextend.proto:25:9",
+		"testdata/local/useoption/option.proto:26:23",
+		"testdata/local/useoption/localextend.proto:30:9",
 	)
 	testDefintionSuccess(
 		t,
-		"testdata/local/useoption/option.proto:24:33",
-		"testdata/local/useoption/localextend.proto:35:6",
+		"testdata/local/useoption/option.proto:27:31",
+		"testdata/local/useoption/localextend.proto:40:6",
 	)
 }
 

@@ -2,26 +2,28 @@ syntax = "proto3";
 
 package useoptionv1;
 
-import "localextend.proto";
 import "extend/extend.proto";
+import "localextend.proto";
 
 message Object {
   string a = 1 [
-      (extendv1.opt) = "a",
-      (extendv1.opt2).a = "a",
-      (extendv1.opt2).nested.b = "a",
-      (extendv1.opt2).nested2 = {b: "a"}
+    (extendv1.opt) = "a",
+    (extendv1.opt2).a = "a",
+    (extendv1.opt2).nested.b = "a",
+    (extendv1.opt2).nested2 = {b: "a"}
   ];
   string b = 2 [
-      (localopt) = "a",
-      (localopt2).a = "a",
-      (localopt2).nested.b = "a",
-      (localopt2).nested2 = {b: "a"},
-      (localopt2).obj = {a: "a", c : {b: "b"}}
+    (localopt) = "a",
+    (localopt2).a = "a",
+    (localopt2).nested.b = "a",
+    (localopt2).nested2 = {b: "a"},
+    (localopt2).obj = {
+      a: "a"
+      c: {b: "b"}
+    }
   ];
   string c = 3 [
-      (localopt) = "type.googleapis.com/useoptionv1.ExtendObject",
-      (localopt2).nested.b = "type.googleapis.com/useoptionv1.ExtendEnum"
+    (localopt) = "type.googleapis.com/useoptionv1.ExtendObject",
+    (localopt2).nested.b = "type.googleapis.com/useoptionv1.ExtendEnum"
   ];
-
 }
