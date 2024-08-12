@@ -10,8 +10,8 @@ extend google.protobuf.FieldOptions {
 }
 
 extend google.protobuf.EnumValueOptions {
-  string localopt3 = 10022;
-  Extend localopt4 = 10023;
+  string enumopt1 = 10022;
+  Extend enumopt2 = 10023;
 }
 
 message Extend {

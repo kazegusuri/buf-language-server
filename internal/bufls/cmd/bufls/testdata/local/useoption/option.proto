@@ -27,3 +27,13 @@ message Object {
     (localopt2).nested.b = "type.googleapis.com/useoptionv1.ExtendEnum"
   ];
 }
+
+enum ObjectType {
+  // unspecified
+  OBJECT_TYPE_UNSPECIFIED = 0;
+
+  OBJECT_TYPE_FOO = 1 [
+    (enumopt1) = "a",
+    (enumopt2).a = "a"
+  ];
+}

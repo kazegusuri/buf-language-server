@@ -528,7 +528,7 @@ func (e *engine) findLocationForIdentifier(
 			continue
 		}
 		switch node.(type) {
-		case *ast.FileNode, *ast.MessageNode, *ast.FieldNode, *ast.RPCNode, *ast.ServiceNode:
+		case *ast.FileNode, *ast.MessageNode, *ast.FieldNode, *ast.RPCNode, *ast.ServiceNode, *ast.EnumValueNode:
 			optionNode = node
 			foundOptionNode = true
 		}
