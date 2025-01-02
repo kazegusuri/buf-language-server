@@ -35,7 +35,6 @@ func Main(name string) {
 func NewRootCommand(name string) *appcmd.Command {
 	builder := appext.NewBuilder(
 		name,
-		appext.BuilderWithTracing(),
 	)
 	return &appcmd.Command{
 		Use:                 name,

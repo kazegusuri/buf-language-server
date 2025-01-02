@@ -29,7 +29,8 @@ import (
 	"github.com/bufbuild/buf/private/bufpkg/bufimage"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule"
 	"github.com/bufbuild/buf/private/pkg/app/appext"
-	"github.com/bufbuild/buf/private/pkg/tracing"
+
+	//	"github.com/bufbuild/buf/private/pkg/tracing"
 	"github.com/bufbuild/protocompile/ast"
 	"github.com/bufbuild/protocompile/parser"
 	"github.com/bufbuild/protocompile/reporter"
@@ -815,7 +816,7 @@ func (e *engine) buildForExternalPath(
 	}
 
 	set := bufmodule.ModuleSetToModuleReadBucketWithOnlyProtoFiles(ws)
-	image, err := bufimage.BuildImage(ctx, tracing.NopTracer, set)
+	image, err := bufimage.BuildImage(ctx, e.container.Logger(), set)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not build image: %w", err)
 	}

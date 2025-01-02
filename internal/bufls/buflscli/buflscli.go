@@ -25,6 +25,7 @@ import (
 
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 // NewEngine returns a new bufls.Engine.
@@ -42,7 +43,7 @@ func NewEngine(
 	}
 
 	return bufls.NewEngine(
-		container.Logger(),
+		zap.NewNop(),
 		container,
 		controller,
 	), nil

@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/pflag"
 	"go.lsp.dev/protocol"
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -76,7 +77,7 @@ func run(
 	if err != nil {
 		return err
 	}
-	handler := bufls.NewHandler(container.Logger(), engine)
+	handler := bufls.NewHandler(zap.NewNop(), engine)
 	conn.Go(
 		ctx,
 		protocol.ServerHandler(
